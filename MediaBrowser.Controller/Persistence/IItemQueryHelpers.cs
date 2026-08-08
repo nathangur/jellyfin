@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using Jellyfin.Database.Implementations;
@@ -44,6 +45,14 @@ public interface IItemQueryHelpers
         JellyfinDbContext context,
         IQueryable<BaseItemEntity> baseQuery,
         InternalItemsQuery filter);
+
+    /// <summary>
+    /// Gets the ids of titles the user removed from the resume and next up lists.
+    /// </summary>
+    /// <param name="context">The database context to read from.</param>
+    /// <param name="userId">The user to resolve overrides for.</param>
+    /// <returns>The overridden item ids, empty when the user has none in effect.</returns>
+    IReadOnlyList<Guid> GetActiveResumeOverrideIds(JellyfinDbContext context, Guid userId);
 
     /// <summary>
     /// Applies navigation property includes to a query based on filter options.

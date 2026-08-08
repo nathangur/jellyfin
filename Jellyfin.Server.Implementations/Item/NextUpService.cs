@@ -45,11 +45,15 @@ public class NextUpService : INextUpService
         ArgumentNullException.ThrowIfNull(filter.User);
 
         using var context = _dbProvider.CreateDbContext();
+        var resumeOverrideIds = _queryHelpers.GetActiveResumeOverrideIds(context, filter.User.Id);
 
         var query = context.BaseItems
             .AsNoTracking()
             .Where(i => filter.TopParentIds.Contains(i.TopParentId!.Value))
             .Where(i => i.Type == _itemTypeLookup.BaseItemKindNames[BaseItemKind.Episode])
+            .Where(i => resumeOverrideIds.Count == 0
+                || !i.SeriesId.HasValue
+                || !resumeOverrideIds.Contains(i.SeriesId.Value))
             .Join(
                 context.UserData.AsNoTracking().Where(e => e.ItemId != EF.Constant(BaseItemRepository.PlaceholderId)),
                 i => new { UserId = filter.User.Id, ItemId = i.Id },

@@ -681,4 +681,27 @@ public sealed partial class BaseItemRepository
                 && (descendants.Any(d => d.Id == lc.ChildId)
                     || context.AncestorIds.Any(a => a.ParentItemId == lc.ChildId && descendants.Any(d => d.Id == a.ItemId))));
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<Guid> GetActiveResumeOverrideIds(JellyfinDbContext context, Guid userId)
+    {
+        // An override stays in effect until the user plays the title, or anything below it, again.
+        var playedSince = context.UserData
+            .Where(ud => ud.UserId == userId && ud.LastPlayedDate != null)
+            .Join(
+                context.BaseItems,
+                ud => ud.ItemId,
+                item => item.Id,
+                (ud, item) => new { item.Id, item.SeriesId, ud.LastPlayedDate });
+
+        // A play exactly on the override timestamp does not lapse it, so removing a title while a
+        // progress write lands in the same tick still hides it.
+        return context.UserItemResumeOverrides
+            .Where(o => o.UserId == userId)
+            .Where(o => !playedSince.Any(p =>
+                p.LastPlayedDate > o.OverriddenAt
+                && (p.Id == o.ItemId || p.SeriesId == o.ItemId)))
+            .Select(o => o.ItemId)
+            .ToArray();
+    }
 }

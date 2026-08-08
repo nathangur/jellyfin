@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
@@ -44,6 +45,7 @@ public class ItemsController : BaseJellyfinApiController
     private readonly ISessionManager _sessionManager;
     private readonly IUserDataManager _userDataRepository;
     private readonly ISearchManager _searchManager;
+    private readonly IResumeOverrideManager _resumeOverrideManager;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ItemsController"/> class.
@@ -56,6 +58,7 @@ public class ItemsController : BaseJellyfinApiController
     /// <param name="sessionManager">Instance of the <see cref="ISessionManager"/> interface.</param>
     /// <param name="userDataRepository">Instance of the <see cref="IUserDataManager"/> interface.</param>
     /// <param name="searchManager">Instance of the <see cref="ISearchManager"/> interface.</param>
+    /// <param name="resumeOverrideManager">Instance of the <see cref="IResumeOverrideManager"/> interface.</param>
     public ItemsController(
         IUserManager userManager,
         ILibraryManager libraryManager,
@@ -64,7 +67,8 @@ public class ItemsController : BaseJellyfinApiController
         ILogger<ItemsController> logger,
         ISessionManager sessionManager,
         IUserDataManager userDataRepository,
-        ISearchManager searchManager)
+        ISearchManager searchManager,
+        IResumeOverrideManager resumeOverrideManager)
     {
         _userManager = userManager;
         _libraryManager = libraryManager;
@@ -74,6 +78,7 @@ public class ItemsController : BaseJellyfinApiController
         _sessionManager = sessionManager;
         _userDataRepository = userDataRepository;
         _searchManager = searchManager;
+        _resumeOverrideManager = resumeOverrideManager;
     }
 
     /// <summary>
@@ -1062,6 +1067,78 @@ public class ItemsController : BaseJellyfinApiController
         excludeActiveSessions);
 
     /// <summary>
+    /// Removes an item from the user's resume list.
+    /// </summary>
+    /// <param name="userId">The user id.</param>
+    /// <param name="itemId">The item id.</param>
+    /// <response code="204">Item removed from the resume list.</response>
+    /// <response code="403">User is not allowed to update this user's data.</response>
+    /// <response code="404">Item is not found.</response>
+    /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
+    [HttpPost("UserItems/{itemId}/ResumeOverride")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public Task<ActionResult> AddResumeOverride(
+        [FromQuery] Guid? userId,
+        [FromRoute, Required] Guid itemId)
+        => ApplyOverrideAsync(userId, itemId, _resumeOverrideManager.HideFromResumeAsync);
+
+    /// <summary>
+    /// Restores an item the user removed from the resume list.
+    /// </summary>
+    /// <param name="userId">The user id.</param>
+    /// <param name="itemId">The item id.</param>
+    /// <response code="204">Item restored to the resume list.</response>
+    /// <response code="403">User is not allowed to update this user's data.</response>
+    /// <response code="404">Item is not found.</response>
+    /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
+    [HttpDelete("UserItems/{itemId}/ResumeOverride")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public Task<ActionResult> DeleteResumeOverride(
+        [FromQuery] Guid? userId,
+        [FromRoute, Required] Guid itemId)
+        => ApplyOverrideAsync(userId, itemId, _resumeOverrideManager.RestoreToResumeAsync);
+
+    /// <summary>
+    /// Removes a series from the user's next up list.
+    /// </summary>
+    /// <param name="userId">The user id.</param>
+    /// <param name="itemId">The item id, an episode, season or series.</param>
+    /// <response code="204">Series removed from the next up list.</response>
+    /// <response code="403">User is not allowed to update this user's data.</response>
+    /// <response code="404">Item is not found.</response>
+    /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
+    [HttpPost("UserItems/{itemId}/NextUpOverride")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public Task<ActionResult> AddNextUpOverride(
+        [FromQuery] Guid? userId,
+        [FromRoute, Required] Guid itemId)
+        => ApplyOverrideAsync(userId, itemId, _resumeOverrideManager.HideFromNextUpAsync);
+
+    /// <summary>
+    /// Restores a series the user removed from the next up list.
+    /// </summary>
+    /// <param name="userId">The user id.</param>
+    /// <param name="itemId">The item id, an episode, season or series.</param>
+    /// <response code="204">Series restored to the next up list.</response>
+    /// <response code="403">User is not allowed to update this user's data.</response>
+    /// <response code="404">Item is not found.</response>
+    /// <returns>A <see cref="NoContentResult"/> indicating success.</returns>
+    [HttpDelete("UserItems/{itemId}/NextUpOverride")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public Task<ActionResult> DeleteNextUpOverride(
+        [FromQuery] Guid? userId,
+        [FromRoute, Required] Guid itemId)
+        => ApplyOverrideAsync(userId, itemId, _resumeOverrideManager.RestoreToNextUpAsync);
+
+    /// <summary>
     /// Get Item User Data.
     /// </summary>
     /// <param name="userId">The user id.</param>
@@ -1176,4 +1253,32 @@ public class ItemsController : BaseJellyfinApiController
         [FromRoute, Required] Guid itemId,
         [FromBody, Required] UpdateUserItemDataDto userDataDto)
         => UpdateItemUserData(userId, itemId, userDataDto);
+
+    private async Task<ActionResult> ApplyOverrideAsync(
+        Guid? userId,
+        Guid itemId,
+        Func<Guid, BaseItem, CancellationToken, Task> apply)
+    {
+        var requestUserId = RequestHelpers.GetUserId(User, userId);
+        var user = _userManager.GetUserById(requestUserId);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        if (!RequestHelpers.AssertCanUpdateUser(User, user, true))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, "User is not allowed to update this item user data.");
+        }
+
+        var item = _libraryManager.GetItemById<BaseItem>(itemId, user);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        await apply(requestUserId, item, CancellationToken.None).ConfigureAwait(false);
+
+        return NoContent();
+    }
 }

@@ -541,6 +541,16 @@ public sealed partial class BaseItemRepository
                             || (inProgress.Where(su => su.ItemId == s.Id).Max(su => su.LastPlayedDate)
                                     == inProgress.Where(eu => eu.ItemId == e.Id).Max(eu => eu.LastPlayedDate)
                                 && s.Id.CompareTo(e.Id) < 0)));
+
+                // Items the user removed from Continue Watching stay hidden until they play them
+                // again. Matched on the item's own id only. Removing one episode should not disturb
+                // other in-progress episodes of the same series, and a series hidden from Next Up
+                // keeps its episodes here.
+                var resumeOverrideIds = GetActiveResumeOverrideIds(context, userId);
+                if (resumeOverrideIds.Count > 0)
+                {
+                    baseQuery = baseQuery.Where(e => !resumeOverrideIds.Contains(e.Id));
+                }
             }
             else
             {
